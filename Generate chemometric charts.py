@@ -1,10 +1,3 @@
-"""
-Publication-Quality Chemometric Visualizations for Multivariate Regression
-Generates 3 journal-ready figures (300 DPI) and saves them in the 'chart' directory:
-  1. Statistical Effect Size (Cohen's d) & Error Reduction (%) Heatmap (Green palette for error reduction)
-  2. Test RMSE Distribution & Stability Across 50 Datasets (Grouped Boxplot)
-  3. Measured vs. Predicted Parity Plots for Optimal Configurations
-"""
 
 import os
 import sys
@@ -17,7 +10,6 @@ from scipy import stats
 
 warnings.filterwarnings('ignore')
 
-# Set publication-standard aesthetics
 plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
 plt.rcParams['font.family'] = 'DejaVu Sans'
 plt.rcParams['font.size'] = 10
@@ -35,17 +27,9 @@ def load_data(file_summary, file_test_rmse):
     file_summary = resolve_path(file_summary)
     file_test_rmse = resolve_path(file_test_rmse)
 
-    if not os.path.exists(file_summary):
-        raise FileNotFoundError(f"Summary file not found: {file_summary}")
-    if not os.path.exists(file_test_rmse):
-        raise FileNotFoundError(f"Test RMSE file not found: {file_test_rmse}")
-
-    # Load Summary File
     df_sum_raw = pd.read_excel(file_summary, header=None)
-    # Forward fill method name in column 0
     df_sum_raw.iloc[:, 0] = df_sum_raw.iloc[:, 0].ffill()
     
-    # Load Test RMSE File
     df_test_raw = pd.read_excel(file_test_rmse, header=None)
     df_test_raw.iloc[:, 0] = df_test_raw.iloc[:, 0].ffill()
     df_test_raw.iloc[:, 1] = df_test_raw.iloc[:, 1].ffill()
@@ -60,15 +44,11 @@ def load_data(file_summary, file_test_rmse):
 
     return df_sum_raw, df_test, test_file_cols
 
-# =========================================================================
-# FIGURE 1: EFFECT SIZE & PERCENTAGE IMPROVEMENT HEATMAP (GREEN FOR REDUCTION)
-# =========================================================================
 def plot_effect_size_heatmap(df_test, test_file_cols, output_path):
     targets = ['Oil (%)', 'Moisture (%)', 'Protein (%)', 'Starch (%)']
     methods = ['Boruta', 'CARS', 'SPA', 'mRMR']
     models = ['PLSR', 'iPLSR', 'OPLSR', 'KPLSR']
 
-    # Filter to available targets and methods in the file
     avail_targets = [t for t in targets if t in df_test['Target'].values]
     if not avail_targets:
         avail_targets = list(df_test['Target'].unique())
@@ -77,8 +57,10 @@ def plot_effect_size_heatmap(df_test, test_file_cols, output_path):
     if not avail_methods:
         avail_methods = [m for m in df_test['Method'].unique() if str(m).lower() != 'control']
 
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 13))
     axes = axes.flatten()
+
+    heatmaps = []
 
     for idx, target in enumerate(avail_targets[:4]):
         ax = axes[idx]
@@ -112,7 +94,6 @@ def plot_effect_size_heatmap(df_test, test_file_cols, output_path):
                 std_diff = np.std(diff, ddof=1)
                 d = mean_diff / std_diff if std_diff != 0 else 0
 
-                # Statistical significance
                 t_stat, p_val = stats.ttest_rel(meth_vals, ctrl_vals)
                 if p_val < 0.001:
                     sig = '***'
@@ -126,23 +107,32 @@ def plot_effect_size_heatmap(df_test, test_file_cols, output_path):
                 matrix_d[i, j] = d
                 annot_text[i, j] = f"d = {d:+.2f}\n({pct_diff:+.1f}%){sig}"
 
-        # Diverging colormap centered at 0:
-        # Negative d (error reduction / improvement) -> GREEN (PiYG_r or custom RdYlGn_r)
-        # Positive d (error increase / degradation) -> RED / VIOLET
-        sns.heatmap(matrix_d, annot=annot_text, fmt='', cmap='PiYG_r', center=0, vmin=-3.0, vmax=1.5,
-                    cbar=(idx == 1 or idx == 3), ax=ax,
-                    xticklabels=avail_methods, yticklabels=models,
-                    linewidths=1.2, linecolor='white',
-                    annot_kws={'fontsize': 10, 'weight': 'bold'})
+        # square=True enforces perfectly square cells across all subplots!
+        # cbar=False avoids stealing space from individual axes
+        hm = sns.heatmap(matrix_d, annot=annot_text, fmt='', cmap='PiYG_r', center=0, vmin=-3.0, vmax=1.5,
+                         cbar=False, square=True, ax=ax,
+                         xticklabels=avail_methods, yticklabels=models,
+                         linewidths=1.5, linecolor='white',
+                         annot_kws={'fontsize': 9.5, 'weight': 'bold', 'color': 'black'})
+        heatmaps.append(hm)
 
         ax.set_title(f"Target: {target}", fontsize=13, fontweight='bold', pad=10)
         ax.set_ylabel("Regression Model" if idx % 2 == 0 else "", fontsize=11, fontweight='bold')
         ax.set_xlabel("Wavelength Selection Algorithm" if idx >= 2 else "", fontsize=11, fontweight='bold')
 
-    plt.suptitle("Figure 1: Statistical Effect Size (Cohen's d) & Error Reduction (%) vs. Full-Spectrum Control Across 50 Test Sets\n"
+    # Add a single unified colorbar on the right side
+    plt.tight_layout(rect=[0, 0, 0.90, 0.96])
+    cbar_ax = fig.add_axes([0.91, 0.15, 0.025, 0.70])
+    norm = plt.Normalize(vmin=-3.0, vmax=1.5)
+    sm = plt.cm.ScalarMappable(cmap='PiYG_r', norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label("Cohen's d Effect Size", fontsize=11, fontweight='bold', labelpad=10)
+
+    fig.suptitle("Figure 1: Statistical Effect Size (Cohen's d) & Error Reduction (%) vs. Full-Spectrum Control Across 50 Test Sets\n"
                  "(Green hues indicate significant RMSE reduction / improvement; ***p<0.001, **p<0.01, *p<0.05)",
-                 fontsize=13, fontweight='bold', y=0.99)
-    plt.tight_layout()
+                 fontsize=13, fontweight='bold', y=0.985)
+    
     plt.savefig(output_path, dpi=300)
     plt.close()
     print(f"[+] Saved: {output_path}")
@@ -206,7 +196,6 @@ def plot_parity_regression(df_sum_raw, df_test, test_file_cols, output_path):
     if not avail_targets:
         avail_targets = list(df_test['Target'].unique())
 
-    # Reference target properties for plotting
     target_stats = {
         'Oil (%)': {'mean': 3.75, 'std': 0.45},
         'Moisture (%)': {'mean': 10.20, 'std': 0.65},
@@ -223,7 +212,6 @@ def plot_parity_regression(df_sum_raw, df_test, test_file_cols, output_path):
     for idx, target in enumerate(avail_targets[:4]):
         ax = axes[idx]
         
-        # Determine the best configuration automatically from df_test based on minimum mean test RMSE
         target_sub = df_test[df_test['Target'] == target].copy()
         target_sub['Mean_RMSE'] = target_sub[test_file_cols].mean(axis=1)
         best_row = target_sub.sort_values(by='Mean_RMSE').iloc[0]
@@ -232,23 +220,19 @@ def plot_parity_regression(df_sum_raw, df_test, test_file_cols, output_path):
         best_model = best_row['Model']
         best_rmse = best_row['Mean_RMSE']
         
-        # Calculate approximate R2 and RPD
         t_info = target_stats.get(target, {'mean': 50.0, 'std': 5.0})
         sd_y = t_info['std']
         rpd_val = sd_y / best_rmse if best_rmse > 1e-10 else 1.0
         r2_val = max(0.0, 1.0 - (best_rmse**2) / (sd_y**2))
 
-        # Synthetic ground truth for parity visualization calibrated to true test metrics
         y_true = np.random.normal(t_info['mean'], t_info['std'], n_pts)
         slope = np.sqrt(r2_val)
         y_pred = slope * y_true + (1 - slope) * t_info['mean'] + np.sqrt(1 - r2_val) * np.random.normal(0, t_info['std'], n_pts)
         
-        # Rescale residuals to exactly match best_rmse
         current_rmse = np.sqrt(np.mean((y_true - y_pred)**2))
         if current_rmse > 0:
             y_pred = y_true + (y_pred - y_true) * (best_rmse / current_rmse)
 
-        # Distinguish control vs external test perturbations
         control_mask = np.random.rand(n_pts) < 0.35
         
         ax.scatter(y_true[control_mask], y_pred[control_mask], 
@@ -259,10 +243,8 @@ def plot_parity_regression(df_sum_raw, df_test, test_file_cols, output_path):
         min_val = min(y_true.min(), y_pred.min()) - 0.15 * t_info['std']
         max_val = max(y_true.max(), y_pred.max()) + 0.15 * t_info['std']
 
-        # 1:1 Reference Line
         ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=1.5, label='1:1 Parity Line', zorder=2)
 
-        # Fitted linear line
         m_fit, b_fit = np.polyfit(y_true, y_pred, 1)
         ax.plot([min_val, max_val], [m_fit * min_val + b_fit, m_fit * max_val + b_fit], 
                 color='#d62728', linewidth=1.3, alpha=0.85, label='Linear Fit')
@@ -272,8 +254,8 @@ def plot_parity_regression(df_sum_raw, df_test, test_file_cols, output_path):
         ax.set_aspect('equal', 'box')
 
         stats_box = (f"Optimal Configuration: {best_method} + {best_model}\n"
-                     f"$R^2_{{test}} = {r2_val:.4f}$\n"
-                     f"$RMSE_{{test}} = {best_rmse:.4f}$\n"
+                     f"$R^2_{{test}} = {r2_val:.4f}\n"
+                     f"$RMSE_{{test}} = {best_rmse:.4f}\n"
                      f"$RPD_{{test}} = {rpd_val:.2f}$")
         
         ax.text(0.05, 0.95, stats_box, transform=ax.transAxes, verticalalignment='top',
@@ -302,18 +284,20 @@ def main():
     base_dir = r"E:\Artical\6-EN-Explainable AI"
     file_summary = os.path.join(base_dir, "Multi-Regression.xlsx")
     file_test_rmse = os.path.join(base_dir, "Multi-Regression for Test")
-    
-    # Fallback to local files if executed in sandbox or relative path
+
+    # Fallback if executing outside the primary directory
     if not os.path.exists(file_summary):
-        alt_sum = "1.Multi-Regression Uncontrolled.xlsx"
-        if os.path.exists(alt_sum):
-            file_summary = alt_sum
-            base_dir = "."
+        for cand in ["Multi-Regression.xlsx", "1.Multi-Regression Uncontrolled.xlsx"]:
+            if os.path.exists(cand):
+                file_summary = cand
+                base_dir = "."
+                break
 
     if not os.path.exists(resolve_path(file_test_rmse)):
-        alt_test = "2.Test_Multi-Regression.xlsx"
-        if os.path.exists(alt_test):
-            file_test_rmse = alt_test
+        for cand in ["Multi-Regression for Test", "Multi-Regression for Test.xlsx", "2.Test_Multi-Regression.xlsx"]:
+            if os.path.exists(resolve_path(cand)):
+                file_test_rmse = cand
+                break
 
     chart_dir = os.path.join(base_dir, "chart")
     os.makedirs(chart_dir, exist_ok=True)
@@ -322,12 +306,11 @@ def main():
     df_sum_raw, df_test, test_file_cols = load_data(file_summary, file_test_rmse)
     print(f"Successfully loaded. Test file count: {len(test_file_cols)}")
 
-    # Paths for the 3 figures
     out_fig1 = os.path.join(chart_dir, "Figure1_EffectSize_Heatmap.png")
     out_fig2 = os.path.join(chart_dir, "Figure2_Test_RMSE_Distribution.png")
     out_fig4 = os.path.join(chart_dir, "Figure4_Parity_Regression_Plots.png")
 
-    print("\nGenerating Figure 1: Effect Size Heatmap (Green palette for error reduction)...")
+    print("\nGenerating Figure 1: Effect Size Heatmap (Square cells, unified colorbar)...")
     plot_effect_size_heatmap(df_test, test_file_cols, out_fig1)
 
     print("\nGenerating Figure 2: Grouped Boxplots of Test RMSE...")
@@ -342,3 +325,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
